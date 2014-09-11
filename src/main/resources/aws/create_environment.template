@@ -6,6 +6,11 @@
             "Description": "Name of an existing EC2 KeyPair to enable SSH access to the NAT instances.",
             "Type": "String",
             "Default": "nat"
+        },
+        "BastionHostKeyName": {
+            "Description": "Keypair for Bastion Host instances.",
+            "Type": "String",
+            "Default": "bastion"
         }
     },
     "Mappings": {
@@ -729,6 +734,83 @@
                 "SourceSecurityGroupId": {
                     "Ref": "NATSecurityGroup"
                 }
+            }
+        },
+        "BastionHost": {
+            "Type": "AWS::EC2::Instance",
+            "Properties": {
+                "DisableApiTermination": "FALSE",
+                "ImageId": "ami-892fe1fe",
+                "InstanceType": "t2.micro",
+                "KeyName": {
+                    "Ref": "BastionHostKeyName"
+                },
+                "Monitoring": "false",
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": "Bastion host"
+                    }
+                ],
+                "NetworkInterfaces": [
+                    {
+                        "DeleteOnTermination": "true",
+                        "Description": "Primary network interface",
+                        "DeviceIndex": 0,
+                        "SubnetId": {
+                            "Ref": "PubSubnet1"
+                        },
+                        "PrivateIpAddresses": [
+                            {
+                                "PrivateIpAddress": "10.0.0.99",
+                                "Primary": "true"
+                            }
+                        ],
+                        "GroupSet": [
+                            {
+                                "Ref": "BastionSG"
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+        "BastionHostEIP": {
+            "Type": "AWS::EC2::EIP",
+            "Properties": {
+                "Domain": "vpc",
+                "InstanceId": {
+                    "Ref": "BastionHost"
+                }
+            }
+        },
+        "BastionSG": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties": {
+                "GroupDescription": "Security group for bastion host, can be used to allow ssh connections from particular IP addresses.",
+                "VpcId": {
+                    "Ref": "VPC"
+                },
+                "SecurityGroupIngress": [
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": "22",
+                        "ToPort": "22",
+                        "CidrIp": "0.0.0.0/0"
+                    }
+                ],
+                "SecurityGroupEgress": [
+                    {
+                        "IpProtocol": "-1",
+                        "CidrIp": "0.0.0.0/0"
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": "Bastion server security group"
+                    }
+                ]
             }
         }
     },
