@@ -814,5 +814,12 @@
             }
         }
     },
-    "Outputs": {}
+    "Outputs": {
+        "BastionHostPublicIp": {
+            "Description": "Public IP address of the bastion host.",
+            "Value": {
+                "Ref": "BastionHostEIP"
+            }
+        }
+    }
 }
