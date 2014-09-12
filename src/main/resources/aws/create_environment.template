@@ -3,14 +3,32 @@
     "Description": "Spring Boot Cloudformation demo stack.",
     "Parameters": {
         "NatKeyName": {
-            "Description": "Name of an existing EC2 KeyPair to enable SSH access to the NAT instances.",
+            "Description": "Name of an existing EC2 KeyPair to enable SSH access to the NAT instances",
             "Type": "String",
             "Default": "nat"
         },
         "BastionHostKeyName": {
-            "Description": "Keypair for Bastion Host instances.",
+            "Description": "Keypair for Bastion Host instances",
             "Type": "String",
             "Default": "bastion"
+        },
+        "BackendKeyName": {
+            "Description": "Keypair for backend instances",
+            "Type": "String",
+            "Default": "backend"
+        },
+        "EnvName": {
+            "Description": "Name of the environment to create",
+            "Type": "String",
+            "Default": "testing"
+        },
+        "SourceBundleS3Bucket": {
+            "Description": "Bucket with source bundle",
+            "Type": "String"
+        },
+        "SourceBundleS3Key": {
+            "Description": "Source bundle S3 key",
+            "Type": "String"
         }
     },
     "Mappings": {
@@ -812,13 +830,299 @@
                     }
                 ]
             }
+        },
+        "DemoBucket": {
+            "Type": "AWS::S3::Bucket",
+            "Properties": {
+                "BucketName": {
+                    "Fn::Join": [
+                        "",
+                        [
+                            "demo-bucket-",
+                            {
+                                "Ref": "EnvName"
+                            }
+                        ]
+                    ]
+                }
+            }
+        },
+        "BackendSG": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties": {
+                "GroupDescription": "Backend security group",
+                "VpcId": {
+                    "Ref": "VPC"
+                },
+                "SecurityGroupEgress": [
+                    {
+                        "IpProtocol": "-1",
+                        "CidrIp": "0.0.0.0/0"
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": "Backend security group"
+                    }
+                ]
+            }
+        },
+        "BackendSGIngress1": {
+            "Type": "AWS::EC2::SecurityGroupIngress",
+            "Properties": {
+                "GroupId": {
+                    "Ref": "BackendSG"
+                },
+                "IpProtocol": "tcp",
+                "FromPort": "22",
+                "ToPort": "22",
+                "SourceSecurityGroupId": {
+                    "Ref": "BastionSG"
+                }
+            }
+        },
+        "BackendIAMRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "Policies": [
+                    {
+                        "PolicyName": "root",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "s3:*"
+                                    ],
+                                    "Resource": {
+                                        "Fn::Join": [
+                                            "",
+                                            [
+                                                "arn:aws:s3:::",
+                                                {
+                                                    "Ref": "DemoBucket"
+                                                },
+                                                "/*"
+                                            ]
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": [
+                                    "ec2.amazonaws.com"
+                                ]
+                            },
+                            "Action": [
+                                "sts:AssumeRole"
+                            ]
+                        }
+                    ]
+                },
+                "Path": "/"
+            }
+        },
+        "BackendInstanceProfile": {
+            "Type": "AWS::IAM::InstanceProfile",
+            "Properties": {
+                "Path": "/",
+                "Roles": [
+                    {
+                        "Ref": "BackendIAMRole"
+                    }
+                ]
+            }
+        },
+        "BackendBeanstalkApp": {
+            "Type": "AWS::ElasticBeanstalk::Application",
+            "Properties": {
+                "ApplicationName": "spring-boot-demo",
+                "Description": "Backend Beanstalk demo application"
+            }
+        },
+        "BackendBeanstalkConfigTemplate": {
+            "Type": "AWS::ElasticBeanstalk::ConfigurationTemplate",
+            "Properties": {
+                "ApplicationName": {
+                    "Ref": "BackendBeanstalkApp"
+                },
+                "Description": "Backend app configuration template.",
+                "SolutionStackName": "64bit Amazon Linux 2014.03 v1.0.3 running Tomcat 7 Java 7",
+                "OptionSettings": [
+                    {
+                        "Namespace": "aws:autoscaling:launchconfiguration",
+                        "OptionName": "IamInstanceProfile",
+                        "Value": {
+                            "Ref": "BackendInstanceProfile"
+                        }
+                    },
+                    {
+                        "Namespace": "aws:autoscaling:launchconfiguration",
+                        "OptionName": "ImageId",
+                        "Value": "ami-2918e35e"
+                    },
+                    {
+                        "Namespace": "aws:elasticbeanstalk:container:tomcat:jvmoptions",
+                        "OptionName": "Xmx",
+                        "Value": "1024m"
+                    },
+                    {
+                        "Namespace": "aws:elasticbeanstalk:application:environment",
+                        "OptionName": "spring.profiles.active",
+                        "Value": {
+                            "Ref": "EnvName"
+                        }
+                    },
+                    {
+                        "Namespace": "aws:elasticbeanstalk:application:environment",
+                        "OptionName": "aws.s3.demoBucket",
+                        "Value": {
+                            "Ref": "DemoBucket"
+                        }
+                    },
+                    {
+                        "Namespace": "aws:autoscaling:launchconfiguration",
+                        "OptionName": "EC2KeyName",
+                        "Value": {
+                            "Ref": "BackendKeyName"
+                        }
+                    },
+                    {
+                        "Namespace": "aws:autoscaling:launchconfiguration",
+                        "OptionName": "InstanceType",
+                        "Value": "m1.small"
+                    },
+                    {
+                        "Namespace": "aws:autoscaling:launchconfiguration",
+                        "OptionName": "SecurityGroups",
+                        "Value": {
+                            "Ref": "BackendSG"
+                        }
+                    },
+                    {
+                        "Namespace": "aws:ec2:vpc",
+                        "OptionName": "VPCId",
+                        "Value": {
+                            "Ref": "VPC"
+                        }
+                    },
+                    {
+                        "Namespace": "aws:ec2:vpc",
+                        "OptionName": "Subnets",
+                        "Value": {
+                            "Fn::Join": [
+                                "",
+                                [
+                                    {
+                                        "Ref": "PriSubnet1"
+                                    },
+                                    ", ",
+                                    {
+                                        "Ref": "PriSubnet2"
+                                    },
+                                    ", ",
+                                    {
+                                        "Ref": "PriSubnet3"
+                                    }
+                                ]
+                            ]
+                        }
+                    },
+                    {
+                        "Namespace": "aws:ec2:vpc",
+                        "OptionName": "ELBSubnets",
+                        "Value": {
+                            "Fn::Join": [
+                                "",
+                                [
+                                    {
+                                        "Ref": "PubSubnet1"
+                                    },
+                                    ", ",
+                                    {
+                                        "Ref": "PubSubnet2"
+                                    },
+                                    ", ",
+                                    {
+                                        "Ref": "PubSubnet3"
+                                    }
+                                ]
+                            ]
+                        }
+                    },
+                    {
+                        "Namespace": "aws:elb:loadbalancer",
+                        "OptionName": "LoadBalancerHTTPPort",
+                        "Value": "80"
+                    }
+                ]
+            }
+        },
+        "BackendEnvironment": {
+            "Type": "AWS::ElasticBeanstalk::Environment",
+            "Properties": {
+                "ApplicationName": {
+                    "Ref": "BackendBeanstalkApp"
+                },
+                "Description": "Demo environment",
+                "EnvironmentName": {
+                    "Fn::Join": [
+                        "",
+                        [
+                            "demo-",
+                            {
+                                "Ref": "EnvName"
+                            }
+                        ]
+                    ]
+                },
+                "TemplateName": {
+                    "Ref": "BackendBeanstalkConfigTemplate"
+                },
+                "VersionLabel": {
+                    "Ref": "BackendInitialVersion"
+                }
+            }
+        },
+        "BackendInitialVersion": {
+            "Type": "AWS::ElasticBeanstalk::ApplicationVersion",
+            "Properties": {
+                "ApplicationName": {
+                    "Ref": "BackendBeanstalkApp"
+                },
+                "Description": "Initial version",
+                "SourceBundle": {
+                    "S3Bucket": {
+                        "Ref": "SourceBundleS3Bucket"
+                    },
+                    "S3Key": {
+                        "Ref": "SourceBundleS3Key"
+                    }
+                }
+            }
         }
     },
     "Outputs": {
         "BastionHostPublicIp": {
-            "Description": "Public IP address of the bastion host.",
+            "Description": "Public IP address of the bastion host",
             "Value": {
                 "Ref": "BastionHostEIP"
+            }
+        },
+        "ApplicationUrl": {
+            "Description": "URL of the app",
+            "Value": {
+                "Fn::GetAtt": ["BackendEnvironment", "EndpointURL"]
             }
         }
     }
