@@ -23,3 +23,10 @@ Running mentioned template creates:
 * Demo bucket.
 * Backend instance profile allowing backend instances all operations on demo bucket. 
 * Backend beanstalk environment inside VPC with initial version (.war file passed as input parameter).
+
+License
+=======
+
+    Copyright 2015 Future Processing Sp. z o.o.
+
+    Licensed under The MIT License (MIT), see LICENSE.txt for details.
